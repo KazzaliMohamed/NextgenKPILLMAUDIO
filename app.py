@@ -6,7 +6,7 @@ from gtts import gTTS
 import base64
 import io
 import speech_recognition as sr
-from mic_recorder import mic_recorder
+from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(
     page_title="NextGen KPI Assistant",
@@ -55,14 +55,16 @@ def text_to_speech(text):
 def audio_to_text(audio_bytes):
     recognizer = sr.Recognizer()
     audio_buffer = io.BytesIO(audio_bytes)
-    with sr.AudioFile(audio_buffer) as source:
-        audio_data = recognizer.record(source)
     try:
+        with sr.AudioFile(audio_buffer) as source:
+            audio_data = recognizer.record(source)
         text = recognizer.recognize_google(audio_data)
         return text
     except sr.UnknownValueError:
         return None
     except sr.RequestError:
+        return None
+    except Exception:
         return None
 
 def find_match(query):
@@ -322,25 +324,21 @@ for message in st.session_state.messages:
 
 # ---------- VOICE + TEXT INPUT ----------
 st.markdown("---")
-col_mic, col_text = st.columns([1, 8])
+st.markdown("#### 🎤 Voice Input")
+audio = mic_recorder(
+    start_prompt="🎤 Click to speak",
+    stop_prompt="⏹ Click to stop",
+    just_once=True,
+    use_container_width=False,
+    key="mic"
+)
 
-with col_mic:
-    audio = mic_recorder(
-        start_prompt="🎤",
-        stop_prompt="⏹",
-        just_once=True,
-        use_container_width=True,
-        key="mic"
-    )
-
-with col_text:
-    typed = st.chat_input("Ask me anything about NextGen KPIs...")
-
-# Handle voice input
+# ---------- HANDLE VOICE ----------
 if audio and audio.get("bytes"):
     with st.spinner("Converting speech to text..."):
         voice_text = audio_to_text(audio["bytes"])
     if voice_text:
+        st.success(f"✅ Heard: {voice_text}")
         st.session_state.messages.append({
             "role": "user",
             "content": f"🎤 {voice_text}"
@@ -350,9 +348,11 @@ if audio and audio.get("bytes"):
         st.session_state.messages.append(response)
         st.rerun()
     else:
-        st.warning("Could not understand audio. Please try again.")
+        st.warning("❌ Could not understand. Please try again.")
 
-# Handle text input
+# ---------- TEXT INPUT ----------
+typed = st.chat_input("Ask me anything about NextGen KPIs...")
+
 if typed:
     st.session_state.messages.append({
         "role": "user",
