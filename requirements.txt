@@ -4,3 +4,6 @@ rapidfuzz
 openpyxl
 groq
 gtts
+streamlit-mic-recorder
+SpeechRecognition
+pydub
