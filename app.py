@@ -5,6 +5,7 @@ from groq import Groq
 from gtts import gTTS
 import base64
 import io
+from streamlit_mic_recorder import speech_to_text
 
 st.set_page_config(
     page_title="NextGen KPI Assistant",
@@ -35,9 +36,80 @@ if "messages" not in st.session_state:
 if "last_voice_index" not in st.session_state:
     st.session_state.last_voice_index = -1
 
+if "last_voice_text" not in st.session_state:
+    st.session_state.last_voice_text = ""
+
+if "danger_mode" not in st.session_state:
+    st.session_state.danger_mode = False
+
+# ---------- DANGER MODE ----------
+if st.session_state.danger_mode:
+    st.markdown("""
+    <style>
+    body, .stApp {
+        background-color: red !important;
+    }
+    .stApp {
+        background-color: red !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: red;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    '>
+        <div style='
+            font-size: 100px;
+            font-weight: bold;
+            color: white;
+            animation: blink 0.5s infinite;
+            text-shadow: 0 0 30px yellow;
+        '>⚠️ DANGER ⚠️</div>
+        <div style='
+            font-size: 60px;
+            color: white;
+            margin-top: 20px;
+            animation: blink 0.5s infinite;
+        '>DANGER DANGER DANGER</div>
+        <div style='font-size: 30px; color: yellow; margin-top: 20px;'>
+            🚨 Sridevi Alert! 🚨
+        </div>
+    </div>
+
+    <audio id="dangerAudio" autoplay loop>
+        <source src="https://www.soundjay.com/misc/sounds/fail-trombone-01.mp3" type="audio/mp3">
+    </audio>
+
+    <style>
+    @keyframes blink {
+        0% { opacity: 1; }
+        50% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    if st.button("✅ Dismiss", key="dismiss_danger"):
+        st.session_state.danger_mode = False
+        st.rerun()
+
+    st.stop()
+
 # ---------- HELPER ----------
 def clean(text):
     return text.lower().strip().lstrip("#").strip()
+
+def is_sridevi_query(query):
+    keywords = ["sridevi", "sri devi", "sreedevi"]
+    return any(k in query.lower() for k in keywords)
 
 def text_to_speech(text):
     clean_text = text.replace("**", "").replace("*", "").replace("#", "").replace("_", "").replace("-", "")
@@ -51,6 +123,19 @@ def text_to_speech(text):
         <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
     </audio>
     """
+
+def audio_to_text(audio_bytes):
+    try:
+        audio_buffer = io.BytesIO(audio_bytes)
+        audio_buffer.name = "audio.wav"
+        transcription = client.audio.transcriptions.create(
+            file=("audio.wav", audio_buffer),
+            model="whisper-large-v3",
+            language="en"
+        )
+        return transcription.text
+    except Exception as e:
+        return None
 
 def find_match(query):
     metric_titles = df["Metric title"].astype(str).tolist()
@@ -193,6 +278,11 @@ Do not make up any information."""
         return f"⚠️ AI response unavailable. Error: {str(e)}"
 
 def process_query(query, is_voice=False):
+    # Easter egg check
+    if is_sridevi_query(query):
+        st.session_state.danger_mode = True
+        st.rerun()
+
     intent = detect_intent(query)
     if intent == "single":
         matched_title = find_match(query)
@@ -310,10 +400,48 @@ for i, message in enumerate(st.session_state.messages):
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
+# ---------- SPACER ----------
+st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+
+# ---------- MIC ----------
+st.markdown("---")
+st.markdown("🎤 **Speak your question:**")
+voice_text = speech_to_text(
+    language="en",
+    start_prompt="🎤 Click to speak",
+    stop_prompt="⏹ Click to stop",
+    just_once=True,
+    use_container_width=False,
+    key="stt"
+)
+
+if voice_text:
+    if voice_text != st.session_state.last_voice_text:
+        st.session_state.last_voice_text = voice_text
+        st.success(f"✅ Heard: {voice_text}")
+
+        if is_sridevi_query(voice_text):
+            st.session_state.danger_mode = True
+            st.rerun()
+
+        st.session_state.messages.append({
+            "role": "user",
+            "content": f"🎤 {voice_text}"
+        })
+        with st.spinner("Thinking..."):
+            response = process_query(voice_text, is_voice=True)
+        st.session_state.messages.append(response)
+        st.session_state.last_voice_index = len(st.session_state.messages) - 1
+        st.rerun()
+
 # ---------- TEXT INPUT ----------
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
 if typed:
+    if is_sridevi_query(typed):
+        st.session_state.danger_mode = True
+        st.rerun()
+
     st.session_state.last_voice_index = -1
     st.session_state.messages.append({
         "role": "user",
