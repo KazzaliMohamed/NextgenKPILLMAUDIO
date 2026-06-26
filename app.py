@@ -5,7 +5,7 @@ from groq import Groq
 from gtts import gTTS
 import base64
 import io
-from streamlit_mic_recorder import mic_recorder
+from streamlit_audio_recorder import st_audiorec
 
 st.set_page_config(
     page_title="NextGen KPI Assistant",
@@ -35,6 +35,9 @@ if "messages" not in st.session_state:
 
 if "last_voice_index" not in st.session_state:
     st.session_state.last_voice_index = -1
+
+if "last_audio_id" not in st.session_state:
+    st.session_state.last_audio_id = None
 
 # ---------- HELPER ----------
 def clean(text):
@@ -249,7 +252,6 @@ def process_query(query, is_voice=False):
     }
 
 # ---------- SUGGESTIONS ----------
-# Always show suggestions at top
 st.markdown("#### 💡 Suggested Searches")
 suggestions = [
     "Total KM Communications",
@@ -288,15 +290,12 @@ for i, message in enumerate(st.session_state.messages):
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-
-                # Only play audio for last voice message
                 if message.get("is_voice") and is_last and i == st.session_state.last_voice_index:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
-
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -321,8 +320,6 @@ for i, message in enumerate(st.session_state.messages):
 
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-
-                # Only play audio for last voice message
                 if message.get("is_voice") and is_last and i == st.session_state.last_voice_index:
                     try:
                         audio_html = text_to_speech(message["summary"])
@@ -333,41 +330,35 @@ for i, message in enumerate(st.session_state.messages):
 # ---------- SPACER ----------
 st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
 
-# ---------- MIC — ALWAYS VISIBLE ----------
+# ---------- MIC ----------
 st.markdown("---")
 st.markdown("🎤 **Speak your question:**")
-audio = mic_recorder(
-    start_prompt="🎤 Click to speak",
-    stop_prompt="⏹ Click to stop",
-    just_once=True,
-    use_container_width=False,
-    key="mic"
-)
+audio_bytes = st_audiorec()
 
-# ---------- HANDLE VOICE ----------
-if audio and audio.get("bytes"):
-    with st.spinner("🎙️ Converting speech to text..."):
-        voice_text = audio_to_text(audio["bytes"])
-    if voice_text:
-        st.success(f"✅ Heard: {voice_text}")
-        st.session_state.messages.append({
-            "role": "user",
-            "content": f"🎤 {voice_text}"
-        })
-        with st.spinner("Thinking..."):
-            response = process_query(voice_text, is_voice=True)
-        st.session_state.messages.append(response)
-        # Track which message index should play audio
-        st.session_state.last_voice_index = len(st.session_state.messages) - 1
-        st.rerun()
-    else:
-        st.warning("❌ Could not understand. Please try again.")
+if audio_bytes is not None:
+    audio_id = hash(audio_bytes)
+    if audio_id != st.session_state.last_audio_id:
+        st.session_state.last_audio_id = audio_id
+        with st.spinner("🎙️ Converting speech to text..."):
+            voice_text = audio_to_text(audio_bytes)
+        if voice_text:
+            st.success(f"✅ Heard: {voice_text}")
+            st.session_state.messages.append({
+                "role": "user",
+                "content": f"🎤 {voice_text}"
+            })
+            with st.spinner("Thinking..."):
+                response = process_query(voice_text, is_voice=True)
+            st.session_state.messages.append(response)
+            st.session_state.last_voice_index = len(st.session_state.messages) - 1
+            st.rerun()
+        else:
+            st.warning("❌ Could not understand. Please try again.")
 
 # ---------- TEXT INPUT ----------
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
 if typed:
-    # Reset voice index so no audio plays for text input
     st.session_state.last_voice_index = -1
     st.session_state.messages.append({
         "role": "user",
