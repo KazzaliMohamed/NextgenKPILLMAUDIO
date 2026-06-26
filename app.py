@@ -5,7 +5,6 @@ from groq import Groq
 from gtts import gTTS
 import base64
 import io
-import speech_recognition as sr
 from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(
@@ -53,18 +52,17 @@ def text_to_speech(text):
     return audio_html
 
 def audio_to_text(audio_bytes):
-    recognizer = sr.Recognizer()
-    audio_buffer = io.BytesIO(audio_bytes)
     try:
-        with sr.AudioFile(audio_buffer) as source:
-            audio_data = recognizer.record(source)
-        text = recognizer.recognize_google(audio_data)
-        return text
-    except sr.UnknownValueError:
-        return None
-    except sr.RequestError:
-        return None
-    except Exception:
+        audio_buffer = io.BytesIO(audio_bytes)
+        audio_buffer.name = "audio.wav"
+        transcription = client.audio.transcriptions.create(
+            file=("audio.wav", audio_buffer),
+            model="whisper-large-v3",
+            language="en"
+        )
+        return transcription.text
+    except Exception as e:
+        st.error(f"Transcription error: {str(e)}")
         return None
 
 def find_match(query):
@@ -322,7 +320,7 @@ for message in st.session_state.messages:
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
-# ---------- VOICE + TEXT INPUT ----------
+# ---------- VOICE INPUT ----------
 st.markdown("---")
 st.markdown("#### 🎤 Voice Input")
 audio = mic_recorder(
@@ -333,7 +331,6 @@ audio = mic_recorder(
     key="mic"
 )
 
-# ---------- HANDLE VOICE ----------
 if audio and audio.get("bytes"):
     with st.spinner("Converting speech to text..."):
         voice_text = audio_to_text(audio["bytes"])
