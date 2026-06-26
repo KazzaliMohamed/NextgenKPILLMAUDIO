@@ -33,6 +33,9 @@ df = df[df["Metric title"].notna()]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "last_voice_index" not in st.session_state:
+    st.session_state.last_voice_index = -1
+
 # ---------- HELPER ----------
 def clean(text):
     return text.lower().strip().lstrip("#").strip()
@@ -246,28 +249,31 @@ def process_query(query, is_voice=False):
     }
 
 # ---------- SUGGESTIONS ----------
-if not st.session_state.messages:
-    st.markdown("#### 💡 Suggested Searches")
-    suggestions = [
-        "Total KM Communications",
-        "Unique HCP Communicated",
-        "HCP Engaged",
-        "HCP Consumed",
-        "HCPs Communicated",
-        "HCPs Engaged",
-    ]
-    cols = st.columns(len(suggestions))
-    for i, label in enumerate(suggestions):
-        with cols[i]:
-            if st.button(label, key=f"chip_{i}", use_container_width=True):
-                st.session_state.messages.append({
-                    "role": "user",
-                    "content": label
-                })
-                with st.spinner("Thinking..."):
-                    response = process_query(label, is_voice=False)
-                st.session_state.messages.append(response)
-                st.rerun()
+# Always show suggestions at top
+st.markdown("#### 💡 Suggested Searches")
+suggestions = [
+    "Total KM Communications",
+    "Unique HCP Communicated",
+    "HCP Engaged",
+    "HCP Consumed",
+    "HCPs Communicated",
+    "HCPs Engaged",
+]
+cols = st.columns(len(suggestions))
+for i, label in enumerate(suggestions):
+    with cols[i]:
+        if st.button(label, key=f"chip_{i}", use_container_width=True):
+            st.session_state.last_voice_index = -1
+            st.session_state.messages.append({
+                "role": "user",
+                "content": label
+            })
+            with st.spinner("Thinking..."):
+                response = process_query(label, is_voice=False)
+            st.session_state.messages.append(response)
+            st.rerun()
+
+st.divider()
 
 # ---------- CHAT HISTORY ----------
 for i, message in enumerate(st.session_state.messages):
@@ -282,12 +288,15 @@ for i, message in enumerate(st.session_state.messages):
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-                if message.get("is_voice") and is_last:
+
+                # Only play audio for last voice message
+                if message.get("is_voice") and is_last and i == st.session_state.last_voice_index:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
+
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -312,7 +321,9 @@ for i, message in enumerate(st.session_state.messages):
 
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-                if message.get("is_voice") and is_last:
+
+                # Only play audio for last voice message
+                if message.get("is_voice") and is_last and i == st.session_state.last_voice_index:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
@@ -320,13 +331,14 @@ for i, message in enumerate(st.session_state.messages):
                         st.warning(f"Audio unavailable: {str(e)}")
 
 # ---------- SPACER ----------
-st.markdown("<div style='height:100px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
 
-# ---------- MIC SECTION ----------
-st.markdown("🎤 **Voice Input** — click to speak, click again to stop")
+# ---------- MIC — ALWAYS VISIBLE ----------
+st.markdown("---")
+st.markdown("🎤 **Speak your question:**")
 audio = mic_recorder(
-    start_prompt="🎤 Start",
-    stop_prompt="⏹ Stop",
+    start_prompt="🎤 Click to speak",
+    stop_prompt="⏹ Click to stop",
     just_once=True,
     use_container_width=False,
     key="mic"
@@ -345,6 +357,8 @@ if audio and audio.get("bytes"):
         with st.spinner("Thinking..."):
             response = process_query(voice_text, is_voice=True)
         st.session_state.messages.append(response)
+        # Track which message index should play audio
+        st.session_state.last_voice_index = len(st.session_state.messages) - 1
         st.rerun()
     else:
         st.warning("❌ Could not understand. Please try again.")
@@ -353,6 +367,8 @@ if audio and audio.get("bytes"):
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
 if typed:
+    # Reset voice index so no audio plays for text input
+    st.session_state.last_voice_index = -1
     st.session_state.messages.append({
         "role": "user",
         "content": typed
