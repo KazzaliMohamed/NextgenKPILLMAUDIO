@@ -22,97 +22,21 @@ st.markdown("""
     <br>
 """, unsafe_allow_html=True)
 
-# ---------- VOICE INPUT COMPONENT ----------
-st.markdown("""
-<div style="display:flex; justify-content:center; margin-bottom:20px;">
-    <div style="background:#f0f2f6; border-radius:30px; padding:10px 20px; display:flex; align-items:center; gap:10px; width:60%;">
-        <span style="color:gray; font-size:15px; flex:1;">🎤 Click microphone to speak your question...</span>
-        <button onclick="startListening()" id="micBtn" style="background:#000; border:none; border-radius:50%; width:45px; height:45px; cursor:pointer; font-size:20px;">🎤</button>
-    </div>
-</div>
-
-<div style="text-align:center; margin-bottom:10px;">
-    <span id="statusText" style="color:gray; font-size:13px;"></span>
-</div>
-
-<input type="hidden" id="voiceResult" />
-
-<script>
-let recognition;
-
-function startListening() {
-    const btn = document.getElementById('micBtn');
-    const status = document.getElementById('statusText');
-
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        status.innerText = '❌ Speech recognition not supported in this browser. Use Chrome.';
-        return;
-    }
-
-    recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = function() {
-        btn.innerText = '⏹';
-        btn.style.background = 'red';
-        status.innerText = '🎙️ Listening... speak now';
-    };
-
-    recognition.onresult = function(event) {
-        const transcript = event.results[0][0].transcript;
-        status.innerText = '✅ Heard: ' + transcript;
-        btn.innerText = '🎤';
-        btn.style.background = '#000';
-
-        // Send to Streamlit
-        const input = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
-        if (input) {
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            nativeInputValueSetter.call(input, transcript);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            setTimeout(() => {
-                const enterEvent = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true });
-                input.dispatchEvent(enterEvent);
-            }, 500);
-        }
-    };
-
-    recognition.onerror = function(event) {
-        status.innerText = '❌ Error: ' + event.error;
-        btn.innerText = '🎤';
-        btn.style.background = '#000';
-    };
-
-    recognition.onend = function() {
-        btn.innerText = '🎤';
-        btn.style.background = '#000';
-    };
-
-    recognition.start();
-}
-</script>
-""", unsafe_allow_html=True)
-
 # ---------- LOAD DATA ----------
 excel_file = "NextGen Metrics Library.xlsm"
 df = pd.read_excel(excel_file, sheet_name="NextGen")
 df.columns = df.columns.str.strip()
 df = df[df["Metric title"].notna()]
 
-# ---------- VOICE TOGGLE ----------
-if "voice_enabled" not in st.session_state:
-    st.session_state.voice_enabled = True
+# ---------- SESSION STATE ----------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-col1, col2 = st.columns([6, 1])
-with col2:
-    if st.button(
-        "🔊 Voice ON" if st.session_state.voice_enabled else "🔇 Voice OFF",
-        use_container_width=True
-    ):
-        st.session_state.voice_enabled = not st.session_state.voice_enabled
-        st.rerun()
+if "voice_input" not in st.session_state:
+    st.session_state.voice_input = None
+
+if "is_voice" not in st.session_state:
+    st.session_state.is_voice = False
 
 # ---------- HELPER ----------
 def clean(text):
@@ -126,7 +50,7 @@ def text_to_speech(text):
     audio_buffer.seek(0)
     audio_data = base64.b64encode(audio_buffer.read()).decode()
     audio_html = f"""
-    <audio controls autoplay style="width:100%; margin-top:10px;">
+    <audio controls autoplay style="width:100%; margin-top:8px;">
         <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
     </audio>
     """
@@ -311,10 +235,6 @@ def process_query(query):
         "summary": summary
     }
 
-# ---------- SESSION STATE ----------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 # ---------- SUGGESTIONS ----------
 if not st.session_state.messages:
     st.markdown("#### 💡 Suggested Searches")
@@ -332,10 +252,12 @@ if not st.session_state.messages:
             if st.button(label, key=f"chip_{i}", use_container_width=True):
                 st.session_state.messages.append({
                     "role": "user",
-                    "content": label
+                    "content": label,
+                    "is_voice": False
                 })
                 with st.spinner("Thinking..."):
                     response = process_query(label)
+                response["is_voice"] = False
                 st.session_state.messages.append(response)
                 st.rerun()
 
@@ -344,18 +266,22 @@ for message in st.session_state.messages:
     if message["role"] == "user":
         with st.chat_message("user"):
             st.markdown(message["content"])
+
     elif message["role"] == "assistant":
         with st.chat_message("assistant"):
             if message["content"] == "single":
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-                if st.session_state.voice_enabled:
+
+                # Only play audio if question was asked by voice
+                if message.get("is_voice"):
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
+
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -377,24 +303,88 @@ for message in st.session_state.messages:
                         if col in wide_fields:
                             st.markdown(f"**{col}**")
                             st.info(str(val))
+
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-                if st.session_state.voice_enabled:
+
+                # Only play audio if question was asked by voice
+                if message.get("is_voice"):
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
+# ---------- CHAT INPUT WITH MIC ----------
+st.markdown("""
+<script>
+function startVoice() {
+    const btn = document.getElementById('micBtn');
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert('Please use Chrome browser for voice input');
+        return;
+    }
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+
+    recognition.onstart = function() {
+        btn.style.color = 'red';
+        btn.innerHTML = '⏹';
+    };
+
+    recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        btn.style.color = '';
+        btn.innerHTML = '🎤';
+
+        const input = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
+        if (input) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            nativeInputValueSetter.call(input, 'VOICE::' + transcript);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            setTimeout(() => {
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+            }, 300);
+        }
+    };
+
+    recognition.onerror = function() {
+        btn.style.color = '';
+        btn.innerHTML = '🎤';
+    };
+
+    recognition.start();
+}
+</script>
+
+<div style="position:fixed; bottom:20px; right:80px; z-index:999;">
+    <button id="micBtn"
+        onclick="startVoice()"
+        style="background:white; border:1px solid #ddd; border-radius:50%;
+               width:42px; height:42px; font-size:18px; cursor:pointer;
+               box-shadow:0 2px 6px rgba(0,0,0,0.15);">
+        🎤
+    </button>
+</div>
+""", unsafe_allow_html=True)
+
 # ---------- CHAT INPUT ----------
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
 if typed:
+    is_voice = typed.startswith("VOICE::")
+    clean_query = typed.replace("VOICE::", "").strip()
+
     st.session_state.messages.append({
         "role": "user",
-        "content": typed
+        "content": clean_query,
+        "is_voice": is_voice
     })
+
     with st.spinner("Thinking..."):
-        response = process_query(typed)
+        response = process_query(clean_query)
+
+    response["is_voice"] = is_voice
     st.session_state.messages.append(response)
     st.rerun()
