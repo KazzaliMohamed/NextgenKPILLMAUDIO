@@ -5,7 +5,6 @@ from groq import Groq
 from gtts import gTTS
 import base64
 import io
-from streamlit_mic_recorder import speech_to_text
 
 st.set_page_config(
     page_title="NextGen KPI Assistant",
@@ -36,9 +35,6 @@ if "messages" not in st.session_state:
 if "last_voice_index" not in st.session_state:
     st.session_state.last_voice_index = -1
 
-if "last_voice_text" not in st.session_state:
-    st.session_state.last_voice_text = ""
-
 # ---------- HELPER ----------
 def clean(text):
     return text.lower().strip().lstrip("#").strip()
@@ -55,19 +51,6 @@ def text_to_speech(text):
         <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
     </audio>
     """
-
-def audio_to_text(audio_bytes):
-    try:
-        audio_buffer = io.BytesIO(audio_bytes)
-        audio_buffer.name = "audio.wav"
-        transcription = client.audio.transcriptions.create(
-            file=("audio.wav", audio_buffer),
-            model="whisper-large-v3",
-            language="en"
-        )
-        return transcription.text
-    except Exception as e:
-        return None
 
 def find_match(query):
     metric_titles = df["Metric title"].astype(str).tolist()
@@ -326,35 +309,6 @@ for i, message in enumerate(st.session_state.messages):
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
-
-# ---------- SPACER ----------
-st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
-
-# ---------- MIC ----------
-st.markdown("---")
-st.markdown("🎤 **Speak your question:**")
-voice_text = speech_to_text(
-    language="en",
-    start_prompt="🎤 Click to speak",
-    stop_prompt="⏹ Click to stop",
-    just_once=True,
-    use_container_width=False,
-    key="stt"
-)
-
-if voice_text:
-    if voice_text != st.session_state.last_voice_text:
-        st.session_state.last_voice_text = voice_text
-        st.success(f"✅ Heard: {voice_text}")
-        st.session_state.messages.append({
-            "role": "user",
-            "content": f"🎤 {voice_text}"
-        })
-        with st.spinner("Thinking..."):
-            response = process_query(voice_text, is_voice=True)
-        st.session_state.messages.append(response)
-        st.session_state.last_voice_index = len(st.session_state.messages) - 1
-        st.rerun()
 
 # ---------- TEXT INPUT ----------
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
