@@ -16,6 +16,74 @@ st.set_page_config(
 # ---------- GROQ CLIENT ----------
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
+# ---------- CUSTOM CSS ----------
+st.markdown("""
+<style>
+.block-container {
+    padding-bottom: 120px;
+}
+
+.chat-input-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: 16px 24px;
+    border-top: 1px solid #e5e5e5;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.stChatInput {
+    flex: 1;
+}
+
+div[data-testid="stChatInput"] {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 80px;
+    z-index: 998;
+    padding: 16px 24px;
+    background: white;
+    border-top: 1px solid #e5e5e5;
+}
+
+.mic-wrapper {
+    position: fixed;
+    bottom: 22px;
+    right: 24px;
+    z-index: 999;
+}
+
+.mic-wrapper button {
+    background: #000 !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 44px !important;
+    height: 44px !important;
+    font-size: 18px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+}
+
+.mic-wrapper button:hover {
+    background: #333 !important;
+}
+
+.mic-recording button {
+    background: red !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------- HEADER ----------
 st.markdown("""
     <h1 style='text-align: center; font-size: 36px;'>📊 NextGen KPI Assistant</h1>
@@ -320,22 +388,27 @@ for message in st.session_state.messages:
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
-# ---------- VOICE INPUT ----------
-st.markdown("---")
-st.markdown("#### 🎤 Voice Input")
-audio = mic_recorder(
-    start_prompt="🎤 Click to speak",
-    stop_prompt="⏹ Click to stop",
-    just_once=True,
-    use_container_width=False,
-    key="mic"
-)
+# ---------- BOTTOM INPUT BAR ----------
+st.markdown("<div style='height:100px'></div>", unsafe_allow_html=True)
 
+col_text, col_mic = st.columns([10, 1])
+
+with col_mic:
+    st.markdown('<div class="mic-wrapper">', unsafe_allow_html=True)
+    audio = mic_recorder(
+        start_prompt="🎤",
+        stop_prompt="⏹",
+        just_once=True,
+        use_container_width=True,
+        key="mic"
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------- HANDLE VOICE ----------
 if audio and audio.get("bytes"):
-    with st.spinner("Converting speech to text..."):
+    with st.spinner("🎙️ Converting speech to text..."):
         voice_text = audio_to_text(audio["bytes"])
     if voice_text:
-        st.success(f"✅ Heard: {voice_text}")
         st.session_state.messages.append({
             "role": "user",
             "content": f"🎤 {voice_text}"
