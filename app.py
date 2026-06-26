@@ -22,65 +22,6 @@ st.markdown("""
 .block-container {
     padding-bottom: 120px;
 }
-
-.chat-input-container {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: white;
-    padding: 16px 24px;
-    border-top: 1px solid #e5e5e5;
-    z-index: 999;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.stChatInput {
-    flex: 1;
-}
-
-div[data-testid="stChatInput"] {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 80px;
-    z-index: 998;
-    padding: 16px 24px;
-    background: white;
-    border-top: 1px solid #e5e5e5;
-}
-
-.mic-wrapper {
-    position: fixed;
-    bottom: 22px;
-    right: 24px;
-    z-index: 999;
-}
-
-.mic-wrapper button {
-    background: #000 !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 50% !important;
-    width: 44px !important;
-    height: 44px !important;
-    font-size: 18px !important;
-    cursor: pointer !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
-}
-
-.mic-wrapper button:hover {
-    background: #333 !important;
-}
-
-.mic-recording button {
-    background: red !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -340,23 +281,26 @@ if not st.session_state.messages:
                 st.rerun()
 
 # ---------- CHAT HISTORY ----------
-for message in st.session_state.messages:
+for i, message in enumerate(st.session_state.messages):
     if message["role"] == "user":
         with st.chat_message("user"):
             st.markdown(message["content"])
 
     elif message["role"] == "assistant":
+        is_last = i == len(st.session_state.messages) - 1
         with st.chat_message("assistant"):
             if message["content"] == "single":
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-                if message.get("is_voice"):
+
+                if message.get("is_voice") and is_last:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
+
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -381,20 +325,20 @@ for message in st.session_state.messages:
 
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-                if message.get("is_voice"):
+
+                if message.get("is_voice") and is_last:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
-# ---------- BOTTOM INPUT BAR ----------
+# ---------- BOTTOM INPUT ----------
 st.markdown("<div style='height:100px'></div>", unsafe_allow_html=True)
 
 col_text, col_mic = st.columns([10, 1])
 
 with col_mic:
-    st.markdown('<div class="mic-wrapper">', unsafe_allow_html=True)
     audio = mic_recorder(
         start_prompt="🎤",
         stop_prompt="⏹",
@@ -402,7 +346,6 @@ with col_mic:
         use_container_width=True,
         key="mic"
     )
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------- HANDLE VOICE ----------
 if audio and audio.get("bytes"):
