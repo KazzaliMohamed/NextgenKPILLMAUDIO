@@ -5,6 +5,8 @@ from groq import Groq
 from gtts import gTTS
 import base64
 import io
+import speech_recognition as sr
+from mic_recorder import mic_recorder
 
 st.set_page_config(
     page_title="NextGen KPI Assistant",
@@ -32,12 +34,6 @@ df = df[df["Metric title"].notna()]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "voice_input" not in st.session_state:
-    st.session_state.voice_input = None
-
-if "is_voice" not in st.session_state:
-    st.session_state.is_voice = False
-
 # ---------- HELPER ----------
 def clean(text):
     return text.lower().strip().lstrip("#").strip()
@@ -55,6 +51,19 @@ def text_to_speech(text):
     </audio>
     """
     return audio_html
+
+def audio_to_text(audio_bytes):
+    recognizer = sr.Recognizer()
+    audio_buffer = io.BytesIO(audio_bytes)
+    with sr.AudioFile(audio_buffer) as source:
+        audio_data = recognizer.record(source)
+    try:
+        text = recognizer.recognize_google(audio_data)
+        return text
+    except sr.UnknownValueError:
+        return None
+    except sr.RequestError:
+        return None
 
 def find_match(query):
     metric_titles = df["Metric title"].astype(str).tolist()
@@ -196,7 +205,7 @@ Do not make up any information."""
     except Exception as e:
         return f"⚠️ AI response unavailable. Error: {str(e)}"
 
-def process_query(query):
+def process_query(query, is_voice=False):
     intent = detect_intent(query)
     if intent == "single":
         matched_title = find_match(query)
@@ -211,7 +220,8 @@ def process_query(query):
                 "content": "single",
                 "matched_title": matched_title,
                 "row": row.to_dict(),
-                "summary": summary
+                "summary": summary,
+                "is_voice": is_voice
             }
     if intent == "comparison":
         matches = find_multiple_matches(query, top_n=3)
@@ -225,14 +235,16 @@ def process_query(query):
             return {
                 "role": "assistant",
                 "content": "comparison",
-                "summary": summary
+                "summary": summary,
+                "is_voice": is_voice
             }
     context = build_full_context()
     summary = ask_llm(query, context, "general")
     return {
         "role": "assistant",
         "content": "general",
-        "summary": summary
+        "summary": summary,
+        "is_voice": is_voice
     }
 
 # ---------- SUGGESTIONS ----------
@@ -252,12 +264,10 @@ if not st.session_state.messages:
             if st.button(label, key=f"chip_{i}", use_container_width=True):
                 st.session_state.messages.append({
                     "role": "user",
-                    "content": label,
-                    "is_voice": False
+                    "content": label
                 })
                 with st.spinner("Thinking..."):
-                    response = process_query(label)
-                response["is_voice"] = False
+                    response = process_query(label, is_voice=False)
                 st.session_state.messages.append(response)
                 st.rerun()
 
@@ -273,15 +283,12 @@ for message in st.session_state.messages:
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-
-                # Only play audio if question was asked by voice
                 if message.get("is_voice"):
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
-
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -306,8 +313,6 @@ for message in st.session_state.messages:
 
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-
-                # Only play audio if question was asked by voice
                 if message.get("is_voice"):
                     try:
                         audio_html = text_to_speech(message["summary"])
@@ -315,76 +320,45 @@ for message in st.session_state.messages:
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
-# ---------- CHAT INPUT WITH MIC ----------
-st.markdown("""
-<script>
-function startVoice() {
-    const btn = document.getElementById('micBtn');
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert('Please use Chrome browser for voice input');
-        return;
-    }
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
+# ---------- VOICE + TEXT INPUT ----------
+st.markdown("---")
+col_mic, col_text = st.columns([1, 8])
 
-    recognition.onstart = function() {
-        btn.style.color = 'red';
-        btn.innerHTML = '⏹';
-    };
+with col_mic:
+    audio = mic_recorder(
+        start_prompt="🎤",
+        stop_prompt="⏹",
+        just_once=True,
+        use_container_width=True,
+        key="mic"
+    )
 
-    recognition.onresult = function(event) {
-        const transcript = event.results[0][0].transcript;
-        btn.style.color = '';
-        btn.innerHTML = '🎤';
+with col_text:
+    typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
-        const input = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
-        if (input) {
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            nativeInputValueSetter.call(input, 'VOICE::' + transcript);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            setTimeout(() => {
-                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-            }, 300);
-        }
-    };
+# Handle voice input
+if audio and audio.get("bytes"):
+    with st.spinner("Converting speech to text..."):
+        voice_text = audio_to_text(audio["bytes"])
+    if voice_text:
+        st.session_state.messages.append({
+            "role": "user",
+            "content": f"🎤 {voice_text}"
+        })
+        with st.spinner("Thinking..."):
+            response = process_query(voice_text, is_voice=True)
+        st.session_state.messages.append(response)
+        st.rerun()
+    else:
+        st.warning("Could not understand audio. Please try again.")
 
-    recognition.onerror = function() {
-        btn.style.color = '';
-        btn.innerHTML = '🎤';
-    };
-
-    recognition.start();
-}
-</script>
-
-<div style="position:fixed; bottom:20px; right:80px; z-index:999;">
-    <button id="micBtn"
-        onclick="startVoice()"
-        style="background:white; border:1px solid #ddd; border-radius:50%;
-               width:42px; height:42px; font-size:18px; cursor:pointer;
-               box-shadow:0 2px 6px rgba(0,0,0,0.15);">
-        🎤
-    </button>
-</div>
-""", unsafe_allow_html=True)
-
-# ---------- CHAT INPUT ----------
-typed = st.chat_input("Ask me anything about NextGen KPIs...")
-
+# Handle text input
 if typed:
-    is_voice = typed.startswith("VOICE::")
-    clean_query = typed.replace("VOICE::", "").strip()
-
     st.session_state.messages.append({
         "role": "user",
-        "content": clean_query,
-        "is_voice": is_voice
+        "content": typed
     })
-
     with st.spinner("Thinking..."):
-        response = process_query(clean_query)
-
-    response["is_voice"] = is_voice
+        response = process_query(typed, is_voice=False)
     st.session_state.messages.append(response)
     st.rerun()
