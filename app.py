@@ -20,7 +20,67 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 st.markdown("""
 <style>
 .block-container {
-    padding-bottom: 120px;
+    padding-bottom: 140px;
+    max-width: 860px;
+}
+
+/* Hide default mic recorder label */
+.mic-container label { display: none; }
+
+/* Style mic recorder button like Claude */
+.mic-container button {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    font-size: 18px !important;
+    cursor: pointer !important;
+    padding: 0 !important;
+    color: #666 !important;
+}
+
+.mic-container button:hover {
+    background: #f0f0f0 !important;
+    color: #000 !important;
+}
+
+/* Fixed bottom bar */
+.bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid #e5e5e5;
+    padding: 12px 24px;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Move chat input up */
+div[data-testid="stChatInput"] {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 60px !important;
+    z-index: 998 !important;
+    background: white !important;
+    padding: 12px 24px !important;
+    border-top: 1px solid #e5e5e5 !important;
+}
+
+/* Position mic button next to chat input */
+.mic-fixed {
+    position: fixed;
+    bottom: 18px;
+    right: 16px;
+    z-index: 999;
+    background: white;
+    border-top: 1px solid #e5e5e5;
+    padding-top: 12px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -54,11 +114,31 @@ def text_to_speech(text):
     audio_buffer.seek(0)
     audio_data = base64.b64encode(audio_buffer.read()).decode()
     audio_html = f"""
-    <audio controls autoplay style="width:100%; margin-top:8px;">
+    <audio id="kpiAudio" controls autoplay style="width:100%; margin-top:8px;">
         <source src="data:audio/mp3;base64,{audio_data}" type="audio/mp3">
     </audio>
+    <script>
+        var existingAudio = document.getElementById('kpiAudio');
+        if (existingAudio) {{
+            existingAudio.pause();
+            existingAudio.currentTime = 0;
+            existingAudio.load();
+            existingAudio.play();
+        }}
+    </script>
     """
     return audio_html
+
+def stop_audio_html():
+    return """
+    <script>
+        var audio = document.getElementById('kpiAudio');
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+    </script>
+    """
 
 def audio_to_text(audio_bytes):
     try:
@@ -293,14 +373,12 @@ for i, message in enumerate(st.session_state.messages):
                 st.markdown(f"### 📊 {message['matched_title']}")
                 st.divider()
                 st.markdown(message["summary"])
-
                 if message.get("is_voice") and is_last:
                     try:
                         audio_html = text_to_speech(message["summary"])
                         st.markdown(audio_html, unsafe_allow_html=True)
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
-
                 st.divider()
                 with st.expander("📋 View full KPI details"):
                     row = message["row"]
@@ -325,7 +403,6 @@ for i, message in enumerate(st.session_state.messages):
 
             elif message["content"] in ("comparison", "general"):
                 st.markdown(message["summary"])
-
                 if message.get("is_voice") and is_last:
                     try:
                         audio_html = text_to_speech(message["summary"])
@@ -333,22 +410,23 @@ for i, message in enumerate(st.session_state.messages):
                     except Exception as e:
                         st.warning(f"Audio unavailable: {str(e)}")
 
-# ---------- BOTTOM INPUT ----------
-st.markdown("<div style='height:100px'></div>", unsafe_allow_html=True)
+# ---------- BOTTOM SPACER ----------
+st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
 
-col_text, col_mic = st.columns([10, 1])
-
-with col_mic:
-    audio = mic_recorder(
-        start_prompt="🎤",
-        stop_prompt="⏹",
-        just_once=True,
-        use_container_width=True,
-        key="mic"
-    )
+# ---------- MIC BUTTON FIXED BOTTOM RIGHT ----------
+st.markdown('<div class="mic-fixed mic-container">', unsafe_allow_html=True)
+audio = mic_recorder(
+    start_prompt="🎤",
+    stop_prompt="⏹",
+    just_once=True,
+    use_container_width=False,
+    key="mic"
+)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------- HANDLE VOICE ----------
 if audio and audio.get("bytes"):
+    st.markdown(stop_audio_html(), unsafe_allow_html=True)
     with st.spinner("🎙️ Converting speech to text..."):
         voice_text = audio_to_text(audio["bytes"])
     if voice_text:
@@ -367,6 +445,7 @@ if audio and audio.get("bytes"):
 typed = st.chat_input("Ask me anything about NextGen KPIs...")
 
 if typed:
+    st.markdown(stop_audio_html(), unsafe_allow_html=True)
     st.session_state.messages.append({
         "role": "user",
         "content": typed
